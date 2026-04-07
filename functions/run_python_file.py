@@ -1,11 +1,11 @@
-import subprocess
 import os
+import subprocess
+
 from google.genai import types
 
 
 def run_python_file(working_directory, file_path, args=None):
     try:
-
         working_dir_abs = os.path.abspath(working_directory)
         target_file = os.path.normpath(os.path.join(working_dir_abs, file_path))
         valid_target_file = (
@@ -19,7 +19,8 @@ def run_python_file(working_directory, file_path, args=None):
             return f'Error: "{file_path}" is not a Python file'
 
         command = ["python", target_file]
-        command.extend(args)
+        if args:
+            command.extend(list(args))
         result = subprocess.run(
             command,
             capture_output=True,

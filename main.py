@@ -1,11 +1,13 @@
-import os
 import argparse
+import os
+from logging import raiseExceptions
 
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+
+from call_function import available_functions, call_function
 from prompts import system_prompt
-from call_function import available_functions
 
 
 def main():
@@ -24,30 +26,51 @@ def main():
         raise RuntimeError("API Key could not be found")
 
     client = genai.Client(api_key=api_key)
+    for _ in range(20):
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=messages,
+            config=types.GenerateContentConfig(
+                tools=[available_functions], system_instruction=system_prompt
+            ),
+        )
+        if response.candidates:
+            for item in response.candidates:
+                messages.append(item.content)
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=messages,
-        config=types.GenerateContentConfig(
-            tools=[available_functions], system_instruction=system_prompt
-        ),
-    )
+        usage = response.usage_metadata
 
-    usage = response.usage_metadata
+        if usage is None:
+            raise RuntimeError("Failed API request on usage metadata")
+        if args.verbose is True:
+            print("User prompt:", args.user_prompt)
+            print("Prompt tokens:", usage.prompt_token_count)
+            print("Response tokens:", usage.candidates_token_count)
+        function_results = []
+        if response.function_calls:
+            for function_call in response.function_calls:
+                print(f"Calling function: {function_call.name}({function_call.args})")
+                function_call_result = call_function(function_call, args.verbose)
+                if not function_call_result.parts:
+                    raise Exception(f"Function {function_call.name} returned no result")
+                if function_call_result.parts[0].function_response.response is None:
+                    raise Exception(
+                        f"Function {function_call.name} returned no response"
+                    )
+                function_results.append(function_call_result.parts[0])
+                if args.verbose:
+                    print(
+                        f"-> {function_call_result.parts[0].function_response.response}"
+                    )
+            messages.append(types.Content(role="user", parts=function_results))
 
-    if usage is None:
-        raise RuntimeError("Failed API request on usage metadata")
-    if args.verbose is True:
-        print("User prompt:", args.user_prompt)
-        print("Prompt tokens:", usage.prompt_token_count)
-        print("Response tokens:", usage.candidates_token_count)
-
-    if response.function_calls:
-        for function_call in response.function_calls:
-            print(f"Calling function: {function_call.name}({function_call.args})")
+        else:
+            print("Response:")
+            print(response.text)
+            break
     else:
-        print("Response:")
-        print(response.text)
+        print("Reached maximum number of iterations")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
